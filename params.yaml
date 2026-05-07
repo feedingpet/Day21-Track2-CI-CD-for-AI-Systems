@@ -1,6 +1,6 @@
 # Chon loai mo hinh: random_forest, logistic_regression, gradient_boosting
 # model_type: random_forest
-model_type: logistic_regression
+model_type: gradient_boosting
 
 
 # Sieu tham so cho cac loai mo hinh
