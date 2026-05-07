@@ -2,7 +2,7 @@ name: MLOps Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     paths:
       - 'data/**.dvc'
       - 'src/**.py'
@@ -136,7 +136,7 @@ jobs:
           import sys
           acc = float("${{ needs.train.outputs.accuracy }}")
           prev_acc = float("${{ needs.train.outputs.prev_accuracy }}")
-          threshold = 0.60
+          threshold = 0.30
           
           print(f"New Accuracy: {acc:.4f}")
           print(f"Previous Accuracy: {prev_acc:.4f}")

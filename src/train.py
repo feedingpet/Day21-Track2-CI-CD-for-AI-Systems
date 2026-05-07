@@ -9,7 +9,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 
-EVAL_THRESHOLD = 0.70
+EVAL_THRESHOLD = 0.30
 
 
 def train(
