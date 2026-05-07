@@ -50,8 +50,8 @@ jobs:
       - name: Authenticate to Cloud Storage
         # 2.11.2: Ghi noi dung secret CLOUD_CREDENTIALS ra file tam va set bien moi truong
         run: |
-          echo '${{ secrets.CLOUD_CREDENTIALS }}' > /tmp/sa-key.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
+          echo '${{ secrets.CLOUD_CREDENTIALS }}' > sa-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/sa-key.json" >> $GITHUB_ENV
 
       - name: Pull data with DVC
         # 2.11.3: Dung lenh dvc pull de tai data
