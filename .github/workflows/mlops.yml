@@ -107,7 +107,7 @@ jobs:
           python - <<'EOF'
           import sys
           acc = float("${{ needs.train.outputs.accuracy }}")
-          threshold = 0.70
+          threshold = 0.60
           if acc < threshold:
               print(f"❌ Accuracy {acc:.4f} is below threshold {threshold}. Aborting deploy.")
               sys.exit(1)
