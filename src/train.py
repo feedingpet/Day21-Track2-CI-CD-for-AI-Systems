@@ -58,7 +58,9 @@ def train(
 
         if model_type == "random_forest":
             n_estimators = params.get("n_estimators", 100)
-            model = RandomForestClassifier(**params, n_estimators=1, warm_start=True, random_state=42)
+            rf_params = params.copy()
+            rf_params.pop("n_estimators", None)
+            model = RandomForestClassifier(**rf_params, n_estimators=1, warm_start=True, random_state=42)
             for step in range(1, n_estimators + 1):
                 model.n_estimators = step
                 model.fit(X_train, y_train)
