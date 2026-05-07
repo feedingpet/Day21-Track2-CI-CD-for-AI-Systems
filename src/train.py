@@ -58,8 +58,9 @@ def train(
 
         if model_type == "random_forest":
             n_estimators = params.get("n_estimators", 100)
-            rf_params = params.copy()
-            rf_params.pop("n_estimators", None)
+            # Sao chep va loai bo n_estimators khoi dict truyen vao constructor
+            rf_params = {k: v for k, v in params.items() if k != "n_estimators"}
+            print(f"RF Params (excluding n_estimators): {rf_params}")
             model = RandomForestClassifier(**rf_params, n_estimators=1, warm_start=True, random_state=42)
             for step in range(1, n_estimators + 1):
                 model.n_estimators = step
