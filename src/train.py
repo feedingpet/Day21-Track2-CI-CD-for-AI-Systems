@@ -57,9 +57,11 @@ def train(
         mlflow.log_params(params)
 
         if model_type == "random_forest":
-            n_estimators = params.get("n_estimators", 100)
-            # Sao chep va loai bo n_estimators khoi dict truyen vao constructor
-            rf_params = {k: v for k, v in params.items() if k != "n_estimators"}
+            # Tranh truyen trung tham so (n_estimators/random_state/warm_start)
+            rf_params = dict(params)
+            n_estimators = int(rf_params.pop("n_estimators", 100))
+            rf_params.pop("random_state", None)
+            rf_params.pop("warm_start", None)
             print(f"RF Params (excluding n_estimators): {rf_params}")
             model = RandomForestClassifier(**rf_params, n_estimators=1, warm_start=True, random_state=42)
             for step in range(1, n_estimators + 1):
