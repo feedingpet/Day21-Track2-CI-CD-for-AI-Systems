@@ -2,6 +2,11 @@ import os
 import json
 import numpy as np
 import pandas as pd
+
+# Thiết lập database tạm thời cho MLflow trong quá trình test
+# Việc này giúp tránh lỗi "MissingConfigException: Yaml file does not exist" trên Github Actions
+os.environ["MLFLOW_TRACKING_URI"] = "sqlite:///mlflow_test.db"
+
 from src.train import train
 
 
