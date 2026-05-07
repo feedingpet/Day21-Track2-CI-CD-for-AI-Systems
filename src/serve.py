@@ -6,36 +6,43 @@ import os
 
 app = FastAPI()
 
-GCS_BUCKET = os.environ["GCS_BUCKET"]
+# Đọc tên bucket từ biến môi trường (được đặt trong systemd service)
+GCS_BUCKET = os.environ.get("GCS_BUCKET", "default-bucket-name-if-not-set")
 GCS_MODEL_KEY = "models/latest/model.pkl"
 MODEL_PATH = os.path.expanduser("~/models/model.pkl")
 
 
 def download_model():
-    """
-    Tai file model.pkl tu GCS ve may khi server khoi dong.
-
-    Ham nay duoc goi mot lan khi module duoc import. Su dung
-    GOOGLE_APPLICATION_CREDENTIALS de xac thuc (duoc dat trong systemd service).
-    """
-    # TODO 1: Tao storage.Client()
-    # client = storage.Client()
-
-    # TODO 2: Lay bucket va blob tuong ung
-    # bucket = client.bucket(GCS_BUCKET)
-    # blob   = bucket.blob(GCS_MODEL_KEY)
-
-    # TODO 3: Tai file model xuong may
-    # blob.download_to_filename(MODEL_PATH)
-
-    # TODO 4: In thong bao thanh cong
-    # print("Model da duoc tai xuong tu GCS.")
-
-    pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+    """Tải file model.pkl từ GCS về máy khi server khởi động."""
+    # Đảm bảo thư mục đích tồn tại
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    
+    # TODO 2.6.1: Tạo một storage.Client()
+    client = storage.Client()
+    
+    # TODO 2.6.2: Lấy bucket bằng client.bucket(GCS_BUCKET)
+    bucket = client.bucket(GCS_BUCKET)
+    
+    # TODO 2.6.3: Lấy blob bằng bucket.blob(GCS_MODEL_KEY)
+    blob = bucket.blob(GCS_MODEL_KEY)
+    
+    # TODO 2.6.4: Tải file xuống bằng blob.download_to_filename(MODEL_PATH)
+    blob.download_to_filename(MODEL_PATH)
+    
+    # TODO 2.6.5: In thông báo thành công
+    print(f"✅ Tải model thành công từ gs://{GCS_BUCKET}/{GCS_MODEL_KEY} xuống {MODEL_PATH}")
 
 
-download_model()
-model = joblib.load(MODEL_PATH)
+# Gọi hàm này khi module được import (chạy khi server khởi động)
+# Lưu ý: Khi chạy dưới local để dev mà chưa set biến môi trường hay file json thì hàm này sẽ báo lỗi.
+# Nhưng khi chạy trên VM, systemd đã cấu hình đủ mọi thứ.
+if os.environ.get("GCS_BUCKET"):
+    download_model()
+    model = joblib.load(MODEL_PATH)
+else:
+    print("⚠️ CẢNH BÁO: Không tìm thấy biến môi trường GCS_BUCKET, bỏ qua bước tải model (Dùng cho local dev).")
+    # Khởi tạo model là None hoặc mock để không bị lỗi khi test local
+    model = None
 
 
 class PredictRequest(BaseModel):
@@ -44,40 +51,39 @@ class PredictRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    """
-    Endpoint kiem tra suc khoe server.
-    GitHub Actions goi endpoint nay sau khi deploy de xac nhan server dang chay.
-
-    Tra ve: {"status": "ok"}
-    """
-    # TODO 5: Tra ve dict {"status": "ok"}
-    pass  # xoa dong nay sau khi hoan thanh
+    """Endpoint kiểm tra sức khỏe server. GitHub Actions dùng endpoint này để xác nhận deploy thành công."""
+    # TODO 2.6.6: Trả về dict {"status": "ok"}
+    return {"status": "ok"}
 
 
 @app.post("/predict")
 def predict(req: PredictRequest):
     """
-    Endpoint suy luan chinh.
+    Endpoint suy luận.
 
-    Dau vao : JSON {"features": [f1, f2, ..., f12]}
-    Dau ra  : JSON {"prediction": <0|1|2>, "label": <"thap"|"trung_binh"|"cao">}
-
-    Thu tu 12 dac trung (khop voi thu tu trong FEATURE_NAMES cua test):
-        fixed_acidity, volatile_acidity, citric_acid, residual_sugar,
-        chlorides, free_sulfur_dioxide, total_sulfur_dioxide, density,
-        pH, sulphates, alcohol, wine_type
+    Đầu vào: JSON {"features": [f1, f2, ..., f12]}
+    Đầu ra:  JSON {"prediction": <0|1|2>, "label": <"thấp"|"trung_bình"|"cao">}
     """
-    # TODO 6: Kiem tra so luong dac trung.
-    # Neu len(req.features) != 12, raise HTTPException(status_code=400, ...)
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model is not loaded. Cannot serve prediction.")
 
-    # TODO 7: Goi model.predict([req.features]) de lay ket qua du doan.
-    # pred = model.predict(...)
+    # TODO 2.6.7: Kiểm tra len(req.features) == 12.
+    if len(req.features) != 12:
+        raise HTTPException(status_code=400, detail="Expected 12 features (wine quality)")
 
-    # TODO 8: Tra ve dict chua "prediction" (int) va "label" (string).
-    # Nhan tuong ung: 0 -> "thap", 1 -> "trung_binh", 2 -> "cao"
-    # return {"prediction": ..., "label": ...}
+    # TODO 2.6.8: Gọi model.predict([req.features]) để lấy kết quả dự đoán.
+    # Hàm predict trả về 1 list/array, ta lấy phần tử đầu tiên
+    pred_value = model.predict([req.features])[0]
+    pred_int = int(pred_value) # Convert kiểu numpy sang kiểu int thuần của Python
 
-    pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+    # TODO 2.6.9: Trả về dict chứa "prediction" (int) và "label" (string).
+    label_map = {0: "thấp", 1: "trung_bình", 2: "cao"}
+    label_str = label_map.get(pred_int, "không xác định")
+
+    return {
+        "prediction": pred_int,
+        "label": label_str
+    }
 
 
 if __name__ == "__main__":
