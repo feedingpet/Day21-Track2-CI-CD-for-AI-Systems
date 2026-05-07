@@ -5,89 +5,126 @@ import yaml
 import json
 import joblib
 import os
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 
 EVAL_THRESHOLD = 0.70
 
 
 def train(
-    params: dict,
+    all_params: dict,
     data_path: str = "data/train_phase1.csv",
     eval_path: str = "data/eval.csv",
 ) -> float:
     """
     Huan luyen mo hinh va ghi nhan ket qua vao MLflow.
-
-    Tham so:
-        params     : dict chua cac sieu tham so cho RandomForestClassifier.
-        data_path  : duong dan den file du lieu huan luyen.
-        eval_path  : duong dan den file du lieu danh gia.
-
-    Tra ve:
-        accuracy (float): do chinh xac tren tap danh gia.
     """
+    # Bonus 1: Cau hinh Tracking URI tu bien moi truong (DagsHub)
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    mlflow.set_tracking_uri(tracking_uri)
+    print(f"MLflow Tracking URI: {tracking_uri}")
 
-    # TODO 1: Doc du lieu huan luyen va danh gia
+    # Doc du lieu
     df_train = pd.read_csv(data_path)
     df_eval  = pd.read_csv(eval_path)
 
-    # TODO 2: Tach dac trung (X) va nhan (y)
+    # Bonus 5: Kiem tra phan phoi nhan
+    print("\n--- Kiem tra phan phoi nhan (Bonus 5) ---")
+    dist = df_train["target"].value_counts(normalize=True).to_dict()
+    warning_flag = False
+    for label, ratio in dist.items():
+        print(f"Lop {label}: {ratio:.2%}")
+        if ratio < 0.10:
+            print(f"⚠️ CANH BAO: Lop {label} chi chiem {ratio:.2%}, duoi nguong 10%!")
+            warning_flag = True
+    if not warning_flag:
+        print("✅ Phan phoi nhan can bang (>10% moi lop).")
+
+    # Tach dac trung va nhan
     X_train = df_train.drop(columns=["target"])
     y_train = df_train["target"]
     X_eval  = df_eval.drop(columns=["target"])
     y_eval  = df_eval["target"]
 
-    with mlflow.start_run():
+    # Bonus 2: Chon loai mo hinh
+    model_type = all_params.get("model_type", "random_forest")
+    params = all_params.get(model_type, {})
+    print(f"\nHuan luyen mo hinh: {model_type}")
 
-        # TODO 3: Ghi nhan cac sieu tham so
+    with mlflow.start_run():
+        mlflow.log_param("model_type", model_type)
         mlflow.log_params(params)
 
-        # TODO 4: Khoi tao va huan luyen RandomForestClassifier
-        # Su dung warm_start=True de tang dan so luong cay va ghi nhan ket qua qua tung buoc (step)
-        n_estimators = params.pop("n_estimators")
-        model = RandomForestClassifier(**params, n_estimators=1, warm_start=True, random_state=42)
-
-        for step in range(1, n_estimators + 1):
-            model.n_estimators = step
+        if model_type == "random_forest":
+            n_estimators = params.get("n_estimators", 100)
+            model = RandomForestClassifier(**params, n_estimators=1, warm_start=True, random_state=42)
+            for step in range(1, n_estimators + 1):
+                model.n_estimators = step
+                model.fit(X_train, y_train)
+                preds = model.predict(X_eval)
+                acc = accuracy_score(y_eval, preds)
+                f1 = f1_score(y_eval, preds, average="weighted")
+                mlflow.log_metric("accuracy_curve", acc, step=step)
+                mlflow.log_metric("f1_score_curve", f1, step=step)
+        
+        elif model_type == "gradient_boosting":
+            # GradientBoostingClassifier khong ho tro warm_start theo kieu n_estimators don gian nhu RF trong vong lap
+            model = GradientBoostingClassifier(**params, random_state=42)
             model.fit(X_train, y_train)
-
-            # TODO 5: Du doan tren tap danh gia va tinh chi so
             preds = model.predict(X_eval)
-            acc   = accuracy_score(y_eval, preds)
-            f1    = f1_score(y_eval, preds, average="weighted")
+            acc = accuracy_score(y_eval, preds)
+            f1 = f1_score(y_eval, preds, average="weighted")
 
-            # TODO 6: Ghi nhan chi so vao MLflow theo tung step de tao Line chart
-            mlflow.log_metric("accuracy_curve", acc, step=step)
-            mlflow.log_metric("f1_score_curve", f1, step=step)
+        elif model_type == "logistic_regression":
+            model = LogisticRegression(**params, random_state=42)
+            model.fit(X_train, y_train)
+            preds = model.predict(X_eval)
+            acc = accuracy_score(y_eval, preds)
+            f1 = f1_score(y_eval, preds, average="weighted")
 
-        # Ghi nhan ket qua cuoi cung (1 lan duy nhat) de tao Bar chart
+        else:
+            raise ValueError(f"Khong ho tro model_type: {model_type}")
+
+        # Ghi nhan ket qua cuoi cung
         mlflow.log_metric("accuracy", acc)
         mlflow.log_metric("f1_score", f1)
-
-        # Khoi phuc lai params de log va luu model sau khi chay xong
-        params["n_estimators"] = n_estimators
         mlflow.sklearn.log_model(model, "model")
 
-        # TODO 7: In ket qua ra man hinh
         print(f"Accuracy: {acc:.4f} | F1: {f1:.4f}")
 
-        # TODO 8: Luu metrics ra file outputs/metrics.json
-        # File nay duoc doc boi GitHub Actions o Buoc 2
+        # Bonus 3: Tao bao cao hieu suat chi tiet
         os.makedirs("outputs", exist_ok=True)
-        with open("outputs/metrics.json", "w") as f:
-            json.dump({"accuracy": acc, "f1_score": f1}, f)
+        report = classification_report(y_eval, preds)
+        matrix = confusion_matrix(y_eval, preds)
+        
+        with open("outputs/report.txt", "w") as f:
+            f.write(f"MODEL TYPE: {model_type}\n")
+            f.write(f"PARAMETERS: {params}\n")
+            f.write("-" * 30 + "\n")
+            f.write("CLASSIFICATION REPORT:\n")
+            f.write(report)
+            f.write("\nCONFUSION MATRIX:\n")
+            f.write(str(matrix))
+        print("✅ Da tao bao cao outputs/report.txt")
 
-        # TODO 9: Luu mo hinh ra file models/model.pkl
-        # File nay duoc upload len GCS o Buoc 2
+        # Luu metrics ra file outputs/metrics.json (Bonus 5: them phan phoi nhan)
+        with open("outputs/metrics.json", "w") as f:
+            json.dump({
+                "accuracy": acc, 
+                "f1_score": f1,
+                "label_distribution": {str(k): v for k, v in dist.items()}
+            }, f)
+
+        # Luu mo hinh
         os.makedirs("models", exist_ok=True)
         joblib.dump(model, "models/model.pkl")
 
-    # TODO 10: Tra ve acc
     return acc
 
 
 if __name__ == "__main__":
     with open("params.yaml") as f:
-        params = yaml.safe_load(f)
-    train(params)
+        all_params = yaml.safe_load(f)
+    train(all_params)
+

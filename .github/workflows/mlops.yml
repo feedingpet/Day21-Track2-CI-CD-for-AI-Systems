@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       accuracy: ${{ steps.read_metrics.outputs.accuracy }}
+      prev_accuracy: ${{ steps.read_metrics.outputs.prev_accuracy }}
 
     steps:
       - uses: actions/checkout@v4
@@ -48,72 +49,109 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Authenticate to Cloud Storage
-        # 2.11.2: Ghi noi dung secret CLOUD_CREDENTIALS ra file tam va set bien moi truong
         run: |
           echo '${{ secrets.CLOUD_CREDENTIALS }}' > sa-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/sa-key.json" >> $GITHUB_ENV
 
       - name: Pull data with DVC
-        # 2.11.3: Dung lenh dvc pull de tai data
         run: dvc pull data/train_phase1.csv data/eval.csv
+
+      - name: Download previous metrics (Bonus 4)
+        continue-on-error: true
+        run: |
+          python - <<'EOF'
+          import os
+          from google.cloud import storage
+          
+          try:
+              bucket_name = '${{ secrets.CLOUD_BUCKET }}'
+              client = storage.Client()
+              bucket = client.bucket(bucket_name)
+              blob = bucket.blob('models/latest/metrics.json')
+              blob.download_to_filename('outputs/previous_metrics.json')
+              print("✅ Downloaded previous metrics.")
+          except Exception as e:
+              print(f"⚠️ Could not download previous metrics: {e}")
+          EOF
 
       - name: Train model
         env:
-          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+          MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.MLFLOW_TRACKING_USERNAME }}/${{ github.event.repository.name }}.mlflow
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: python src/train.py
 
       - name: Read metrics
         id: read_metrics
-        # 2.11.4: Doc gia tri "accuracy" tu file outputs/metrics.json va set thanh output
         run: |
           acc=$(python -c "import json; print(json.load(open('outputs/metrics.json'))['accuracy'])")
           echo "accuracy=$acc" >> $GITHUB_OUTPUT
+          
+          if [ -f "outputs/previous_metrics.json" ]; then
+            prev_acc=$(python -c "import json; print(json.load(open('outputs/previous_metrics.json'))['accuracy'])")
+          else
+            prev_acc=0
+          fi
+          echo "prev_accuracy=$prev_acc" >> $GITHUB_OUTPUT
 
-      - name: Upload model to Cloud Storage
-        # 2.11.5: Su dung google-cloud-storage SDK de upload file model.pkl
+      - name: Upload model and metrics to Cloud Storage (Bonus 4)
         run: |
           python - <<'EOF'
           import os
           from google.cloud import storage
           
           bucket_name = '${{ secrets.CLOUD_BUCKET }}'
-          model_path = 'models/model.pkl'
-          destination_blob_name = 'models/latest/model.pkl'
-          
           client = storage.Client()
           bucket = client.bucket(bucket_name)
-          blob = bucket.blob(destination_blob_name)
           
-          blob.upload_from_filename(model_path)
-          print(f"Uploaded {model_path} to gs://{bucket_name}/{destination_blob_name}")
+          # Upload model
+          blob_model = bucket.blob('models/latest/model.pkl')
+          blob_model.upload_from_filename('models/model.pkl')
+          
+          # Upload metrics
+          blob_metrics = bucket.blob('models/latest/metrics.json')
+          blob_metrics.upload_from_filename('outputs/metrics.json')
+          
+          print("✅ Uploaded model and metrics to Cloud Storage.")
           EOF
 
-      - name: Save metrics as artifact
+      - name: Save reports as artifact (Bonus 3)
         uses: actions/upload-artifact@v4
         with:
-          name: metrics
-          path: outputs/metrics.json
+          name: model-reports
+          path: |
+            outputs/metrics.json
+            outputs/report.txt
 
-  # JOB 3: Kiem tra chat luong - chi cho phep deploy khi accuracy >= 0.70
+  # JOB 3: Kiem tra chat luong - chi cho phep deploy khi accuracy >= 0.70 VA >= accuracy cu (Bonus 4)
   eval:
     name: Eval
-    needs: train             # Chi chay khi job train qua
+    needs: train
     runs-on: ubuntu-latest
     steps:
 
       - name: Check eval gate
-        # 2.11.6: Doc gia tri accuracy tu output cua job train va kiem tra
         run: |
           python - <<'EOF'
           import sys
           acc = float("${{ needs.train.outputs.accuracy }}")
+          prev_acc = float("${{ needs.train.outputs.prev_accuracy }}")
           threshold = 0.60
+          
+          print(f"New Accuracy: {acc:.4f}")
+          print(f"Previous Accuracy: {prev_acc:.4f}")
+          
           if acc < threshold:
-              print(f"❌ Accuracy {acc:.4f} is below threshold {threshold}. Aborting deploy.")
+              print(f"❌ Accuracy {acc:.4f} is below threshold {threshold}. Aborting.")
               sys.exit(1)
-          else:
-              print(f"✅ Accuracy {acc:.4f} meets the threshold {threshold}. Proceeding to deploy.")
+          
+          if acc < prev_acc:
+              print(f"❌ Accuracy {acc:.4f} is lower than previous {prev_acc:.4f}. Rollback/Abort deploy.")
+              sys.exit(1)
+              
+          print(f"✅ Accuracy meets all criteria. Proceeding to deploy.")
           EOF
+
 
   # JOB 4: Trien khai sau khi eval gate qua
   deploy:
